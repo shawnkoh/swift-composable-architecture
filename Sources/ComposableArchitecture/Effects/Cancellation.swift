@@ -47,6 +47,7 @@ extension Effect {
       cancellationCancellable = AnyCancellable {
         cancellablesLock.sync {
           cancellationSubject.send(())
+          cancellationSubject.send(completion: .finished)
           cancellationCancellables[id]?.remove(cancellationCancellable)
           if cancellationCancellables[id]?.isEmpty == .some(true) {
             cancellationCancellables[id] = nil
@@ -88,16 +89,17 @@ extension Effect {
   /// - Parameter ids: A variadic list of effect identifiers.
   /// - Returns: A new effect that will cancel any currently in-flight effects with the given
   ///   identifiers.
+  @_disfavoredOverload
   public static func cancel(ids: AnyHashable...) -> Effect {
     .cancel(ids: ids)
   }
 
   /// An effect that will cancel multiple currently in-flight effects with the given identifiers.
   ///
-  /// - Parameter ids: An array of effect identifiers.
+  /// - Parameter ids: A sequence of effect identifiers.
   /// - Returns: A new effect that will cancel any currently in-flight effects with the given
   ///   identifiers.
-  public static func cancel(ids: [AnyHashable]) -> Effect {
+  public static func cancel<S: Sequence>(ids: S) -> Effect where S.Element == AnyHashable {
     .merge(ids.map(Effect.cancel(id:)))
   }
 }
