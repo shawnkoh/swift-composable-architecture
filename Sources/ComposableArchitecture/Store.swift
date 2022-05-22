@@ -1,10 +1,6 @@
 import Combine
 import Foundation
 
-#if DEBUG
-  import os
-#endif
-
 /// A store represents the runtime that powers the application. It is the object that you will pass
 /// around to views that need to interact with the application.
 ///
@@ -75,6 +71,7 @@ import Foundation
 ///         .tabItem { Text("Profile") }
 ///     }
 ///   }
+/// }
 /// ```
 ///
 /// ### Thread safety
@@ -89,13 +86,14 @@ import Foundation
 /// It is possible to make this process thread-safe by introducing locks or queues, but this
 /// introduces new complications:
 ///
-/// * If done simply with `DispatchQueue.main.async` you will incur a thread hop even when you are
-/// already on the main thread. This can lead to unexpected behavior in UIKit and SwiftUI, where
-/// sometimes you are required to do work synchronously, such as in animation blocks.
+///   * If done simply with `DispatchQueue.main.async` you will incur a thread hop even when you are
+///     already on the main thread. This can lead to unexpected behavior in UIKit and SwiftUI, where
+///     sometimes you are required to do work synchronously, such as in animation blocks.
 ///
-/// * It is possible to create a scheduler that performs its work immediately when on the main
-/// thread and otherwise uses `DispatchQueue.main.async` (e.g. see CombineScheduler's
-/// [UIScheduler](https://github.com/pointfreeco/combine-schedulers/blob/main/Sources/CombineSchedulers/UIScheduler.swift)).
+///   * It is possible to create a scheduler that performs its work immediately when on the main
+///     thread and otherwise uses `DispatchQueue.main.async` (_e.g._, see Combine Schedulers'
+///     [UIScheduler][uischeduler]).
+///
 /// This introduces a lot more complexity, and should probably not be adopted without having a very
 /// good reason.
 ///
@@ -114,6 +112,8 @@ import Foundation
 /// multiple in-flight effects interleave with each other and affect the state of your application.
 /// However, by leaving scheduling out of the ``Store`` we get to test these aspects of our effects
 /// if we so desire, or we can ignore if we prefer. We have that flexibility.
+///
+/// [uischeduler]: https://github.com/pointfreeco/combine-schedulers/blob/main/Sources/CombineSchedulers/UIScheduler.swift
 ///
 /// #### Thread safety checks
 ///
@@ -420,8 +420,7 @@ public final class Store<State, Action> {
 
       switch status {
       case let .effectCompletion(action):
-        os_log(
-          .fault, dso: rw.dso, log: rw.log,
+        runtimeWarning(
           """
           An effect completed on a non-main thread. …
 
@@ -436,12 +435,11 @@ public final class Store<State, Action> {
           "Store" (including all of its scopes and derived view stores) must be done on the same \
           thread.
           """,
-          debugCaseOutput(action)
+          [debugCaseOutput(action)]
         )
 
       case .`init`:
-        os_log(
-          .fault, dso: rw.dso, log: rw.log,
+        runtimeWarning(
           """
           A store initialized on a non-main thread. …
 
@@ -455,8 +453,7 @@ public final class Store<State, Action> {
         )
 
       case .scope:
-        os_log(
-          .fault, dso: rw.dso, log: rw.log,
+        runtimeWarning(
           """
           "Store.scope" was called on a non-main thread. …
 
@@ -470,8 +467,7 @@ public final class Store<State, Action> {
         )
 
       case let .send(action, originatingAction: nil):
-        os_log(
-          .fault, dso: rw.dso, log: rw.log,
+        runtimeWarning(
           """
           "ViewStore.send" was called on a non-main thread with: %@ …
 
@@ -482,12 +478,11 @@ public final class Store<State, Action> {
           "Store" (including all of its scopes and derived view stores) must be done on the same \
           thread.
           """,
-          debugCaseOutput(action)
+          [debugCaseOutput(action)]
         )
 
       case let .send(action, originatingAction: .some(originatingAction)):
-        os_log(
-          .fault, dso: rw.dso, log: rw.log,
+        runtimeWarning(
           """
           An effect published an action on a non-main thread. …
 
@@ -505,8 +500,10 @@ public final class Store<State, Action> {
           "Store" (including all of its scopes and derived view stores) must be done on the same \
           thread.
           """,
-          debugCaseOutput(action),
-          debugCaseOutput(originatingAction)
+          [
+            debugCaseOutput(action),
+            debugCaseOutput(originatingAction),
+          ]
         )
       }
     #endif

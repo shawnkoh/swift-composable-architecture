@@ -242,17 +242,17 @@ public struct Effect<Output, Failure: Error>: Publisher {
   }
 
   /// Creates an effect that executes some work in the real world that doesn't need to feed data
-  /// back into the store.
+  /// back into the store. If an error is thrown, the effect will complete and the error will be ignored.
   ///
   /// - Parameter work: A closure encapsulating some work to execute in the real world.
   /// - Returns: An effect.
-  public static func fireAndForget(_ work: @escaping () -> Void) -> Effect {
+  public static func fireAndForget(_ work: @escaping () throws -> Void) -> Effect {
     // NB: Ideally we'd return a `Deferred` wrapping an `Empty(completeImmediately: true)`, but
     //     due to a bug in iOS 13.2 that publisher will never complete. The bug was fixed in
     //     iOS 13.3, but to remain compatible with iOS 13.2 and higher we need to do a little
     //     trickery to make sure the deferred publisher completes.
     Deferred { () -> Publishers.CompactMap<Result<Output?, Failure>.Publisher, Output> in
-      work()
+      try? work()
       return Just<Output?>(nil)
         .setFailureType(to: Failure.self)
         .compactMap { $0 }
@@ -313,6 +313,28 @@ extension Publisher {
   /// - Returns: An effect that wraps `self`.
   public func eraseToEffect() -> Effect<Output, Failure> {
     Effect(self)
+  }
+
+  /// Turns any publisher into an ``Effect``.
+  ///
+  /// This is a convenience operator for writing ``Effect/eraseToEffect()`` followed by a
+  /// ``Effect/map(_:)``.
+  ///
+  /// ```swift
+  /// case .buttonTapped:
+  ///   return fetchUser(id: 1)
+  ///     .filter(\.isAdmin)
+  ///     .eraseToEffect(ProfileAction.adminUserFetched)
+  /// ```
+  ///
+  /// - Parameters:
+  ///   - transform: A mapping function that converts `Output` to another type.
+  /// - Returns: An effect that wraps `self` after mapping `Output` values.
+  public func eraseToEffect<T>(
+    _ transform: @escaping (Output) -> T
+  ) -> Effect<T, Failure> {
+    self.map(transform)
+      .eraseToEffect()
   }
 
   /// Turns any publisher into an ``Effect`` that cannot fail by wrapping its output and failure in

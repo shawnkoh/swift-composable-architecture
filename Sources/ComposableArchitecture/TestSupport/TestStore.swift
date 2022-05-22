@@ -106,13 +106,13 @@
   /// let searchReducer = Reducer<SearchState, SearchAction, SearchEnvironment> {
   ///   state, action, environment in
   ///
-  ///     struct SearchId: Hashable {}
+  ///     enum SearchId {}
   ///
   ///     switch action {
   ///     case let .queryChanged(query):
   ///       state.query = query
   ///       return environment.request(self.query)
-  ///         .debounce(id: SearchId(), for: 0.5, scheduler: environment.mainQueue)
+  ///         .debounce(id: SearchId.self, for: 0.5, scheduler: environment.mainQueue)
   ///
   ///     case let .response(results):
   ///       state.results = results
@@ -174,7 +174,7 @@
     private let file: StaticString
     private let fromLocalAction: (LocalAction) -> Action
     private var line: UInt
-    private var longLivingEffects: Set<LongLivingEffect> = []
+    private var inFlightEffects: Set<LongLivingEffect> = []
     var receivedActions: [(action: Action, state: State)] = []
     private let reducer: Reducer<State, Action, Environment>
     private var snapshotState: State
@@ -217,10 +217,10 @@
             effects
             .handleEvents(
               receiveSubscription: { [weak self] _ in
-                self?.longLivingEffects.insert(effect)
+                self?.inFlightEffects.insert(effect)
               },
-              receiveCompletion: { [weak self] _ in self?.longLivingEffects.remove(effect) },
-              receiveCancel: { [weak self] in self?.longLivingEffects.remove(effect) }
+              receiveCompletion: { [weak self] _ in self?.inFlightEffects.remove(effect) },
+              receiveCancel: { [weak self] in self?.inFlightEffects.remove(effect) }
             )
             .map { .init(origin: .receive($0), file: action.file, line: action.line) }
             .eraseToEffect()
@@ -248,7 +248,7 @@
           file: self.file, line: self.line
         )
       }
-      for effect in self.longLivingEffects {
+      for effect in self.inFlightEffects {
         XCTFail(
           """
           An effect returned for this action is still running. It must complete before the end of \
@@ -288,7 +288,7 @@
       }
     }
 
-    private struct TestAction {
+    private struct TestAction: CustomDebugStringConvertible {
       let origin: Origin
       let file: StaticString
       let line: UInt
@@ -296,6 +296,16 @@
       enum Origin {
         case send(LocalAction)
         case receive(Action)
+      }
+
+      var debugDescription: String {
+        switch self.origin {
+        case let .send(action):
+          return debugCaseOutput(action)
+
+        case let .receive(action):
+          return debugCaseOutput(action)
+        }
       }
     }
   }
@@ -331,7 +341,7 @@
       _ action: LocalAction,
       file: StaticString = #file,
       line: UInt = #line,
-      _ update: @escaping (inout LocalState) throws -> Void = { _ in }
+      _ update: ((inout LocalState) throws -> Void)? = nil
     ) {
       if !self.receivedActions.isEmpty {
         var actions = ""
@@ -349,7 +359,12 @@
       var expectedState = self.toLocalState(self.snapshotState)
       self.store.send(.init(origin: .send(action), file: file, line: line))
       do {
-        try update(&expectedState)
+        try self.expectedStateShouldChange(
+          expected: &expectedState,
+          update: update,
+          file: file,
+          line: line
+        )
       } catch {
         XCTFail("Threw error: \(error)", file: file, line: line)
       }
@@ -361,6 +376,27 @@
       )
       if "\(self.file)" == "\(file)" {
         self.line = line
+      }
+    }
+
+    private func expectedStateShouldChange(
+      expected: inout LocalState,
+      update: ((inout LocalState) throws -> Void)? = nil,
+      file: StaticString,
+      line: UInt
+    ) throws {
+      guard let update = update else { return }
+      let current = expected
+      try update(&expected)
+      if expected == current {
+        XCTFail(
+          """
+          Expected to modify the expected state, but no change occurred.
+
+          Ensure that the state was modified or remove the closure to assert no change.
+          """,
+          file: file, line: line
+        )
       }
     }
 
@@ -384,7 +420,7 @@
 
         XCTFail(
           """
-          State change does not match expectation: …
+          A state change does not match expectation: …
 
           \(difference)
           """,
@@ -400,7 +436,7 @@
       _ expectedAction: Action,
       file: StaticString = #file,
       line: UInt = #line,
-      _ update: @escaping (inout LocalState) throws -> Void = { _ in }
+      _ update: ((inout LocalState) throws -> Void)? = nil
     ) {
       guard !self.receivedActions.isEmpty else {
         XCTFail(
@@ -435,7 +471,12 @@
       }
       var expectedState = self.toLocalState(self.snapshotState)
       do {
-        try update(&expectedState)
+        try self.expectedStateShouldChange(
+          expected: &expectedState,
+          update: update,
+          file: file,
+          line: line
+        )
       } catch {
         XCTFail("Threw error: \(error)", file: file, line: line)
       }
